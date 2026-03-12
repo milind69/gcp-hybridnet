@@ -23,3 +23,17 @@ resource "google_compute_subnetwork" "hybrid-service-subnet" {
   region = var.region
   network      = google_compute_network.hybrid-service-vpc.id
 }
+
+resource "google_network_connectivity_hub" "ncc_hub" {
+  name    = "ncc-hub"
+
+}
+
+resource "google_network_connectivity_spoke" "hybrid_spoke" {
+    name    = "hybrid-spoke"
+    hub     = google_network_connectivity_hub.ncc_hub.id  
+    location = var.region  
+    linked_vpc_network {
+      uri =google_compute_network.hybrid-vpc.id
+    }
+}
