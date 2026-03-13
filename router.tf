@@ -43,7 +43,7 @@ resource "google_compute_router_route_policy" "prepend_on_prefix_match" {
   # }
 }
 
-# Interconnect and Peering 
+# Interconnect and Peering - TBD
 
 # #Ashburn IC attachment  - Note can not be done till interconnect is created for dedicated 
 # resource "google_compute_interconnect_attachment" "ashburn_ica" {
@@ -73,15 +73,15 @@ resource "google_compute_router_route_policy" "prepend_on_prefix_match" {
 #   router                  = google_compute_router.hybrid-router.name
 #   region                  = var.region
 #   ip_range                = "169.254.10.1/30"
-#   interconnect_attachment = google_compute_interconnect_attachment.ashburn_ic.name
+#   interconnect_attachment = google_compute_interconnect_attachment.ashburn_ica.name
 # }
 
 # resource "google_compute_router_interface" "router-chicago-interface-01" {
 #   name                    = "router-chicago-interface-01"
 #   router                  = google_compute_router.hybrid-router.name
 #   region                  = var.region
-#   ip_range                = "169.254.10.1/30"
-#   interconnect_attachment = google_compute_interconnect_attachment.chicago_ic.name
+#   ip_range                = "169.254.20.1/30"
+#   interconnect_attachment = google_compute_interconnect_attachment.chicago_ica.name
 # }
 
 # #BGP Peering 
