@@ -3,21 +3,21 @@ variable "project" {
 }
 
 variable "region" {
-  type = string
+  type    = string
   default = "us-central1"
-}   
+}
 
 variable "project_id" {
   type = string
 }
 
 variable "router_asn" {
-    type = number
-    default = 64620
+  type = number
+
 }
 
 variable "peer_asn" {
   type = number
-  default = 65012
+
 }
 

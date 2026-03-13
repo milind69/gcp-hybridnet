@@ -8,6 +8,190 @@ Terraform configuration for a Google Cloud hybrid networking topology using **De
 
 ```mermaid
 graph TB
+    subgraph OnPrem["On-Premises Network"]
+        OPR["On-Premises Router\nASN: 65512"]
+    end
+
+    subgraph GCP["Google Cloud — us-central1"]
+
+        subgraph SpokeVPC["hybrid-spoke-vpc ✅"]
+            CR["Cloud Router · hybrid-router\nASN: 64620 ✅"]
+            RP["Route Policy · prepend-on-prefix-match\nEXPORT · match 10.2.2.0/24\nAS-path prepend ×5 ✅"]
+            SN1["Subnet: hybrid-spoke-subnet\n10.1.1.0/24 ✅"]
+        end
+
+        subgraph ServiceVPC["hybrid-service-vpc ✅"]
+            SN2["Subnet: hybrid-service-subnet\n10.1.2.0/24 ✅"]
+        end
+
+        subgraph NCC["Network Connectivity Center ✅"]
+            HUB["NCC Hub · ncc-hub"]
+            SP1["Spoke · hybrid-spoke\nhybrid-spoke-vpc"]
+            SP2["Spoke · hybrid-service-spoke\nhybrid-service-vpc"]
+        end
+
+        subgraph IC["Dedicated Interconnect ⏳ TBD"]
+            IC1["Ashburn Attachment · ashburn-ic\nDomain 1 · 10 Gbps\nInterface: 169.254.10.1/30"]
+            IC2["Chicago Attachment · chicago-ic\nDomain 2 · 10 Gbps\nInterface: 169.254.20.1/30"]
+            BGP1["BGP Peer · ashburn-peer\nPeer IP: 169.254.10.2"]
+            BGP2["BGP Peer · chicago-peer\nPeer IP: 169.254.20.2"]
+        end
+
+        subgraph FW["Firewall Rules ⏳ Awaiting IAM"]
+            FW1["hub-allow-internal\nhybrid-spoke-vpc\nAllow all · src 10.1.1.0/24, 10.1.2.0/24"]
+            FW2["spoke-allow-internal\nhybrid-service-vpc\nAllow all · src 10.1.1.0/24, 10.1.2.0/24"]
+        end
+    end
+
+    OPR -. "BGP · 169.254.10.x" .-> IC1
+    OPR -. "BGP · 169.254.20.x" .-> IC2
+    IC1 -. "planned" .-> BGP1
+    IC2 -. "planned" .-> BGP2
+    BGP1 -. "planned" .-> CR
+    BGP2 -. "planned" .-> CR
+    CR --> RP
+    CR --- SN1
+    SN1 --- SP1
+    SN2 --- SP2
+    SP1 --- HUB
+    SP2 --- HUB
+    SP1 -. "transitive via NCC" .- SP2
+    SN1 -. "planned" .-> FW1
+    SN2 -. "planned" .-> FW2
+```
+
+> ✅ Deployed &nbsp;|&nbsp; ⏳ Pending &nbsp;|&nbsp; Dashed = not yet active
+
+---
+
+## Deployment Status
+
+| Component | Status | Blocker |
+|---|---|---|
+| VPCs & Subnets | ✅ Deployed | — |
+| NCC Hub & Spokes | ✅ Deployed | — |
+| Cloud Router | ✅ Deployed | — |
+| BGP Export Route Policy | ✅ Deployed | — |
+| Firewall Rules | ⏳ Pending | Requires `compute.firewalls.create` permission |
+| Dedicated IC Attachments | ⏳ Pending | Physical cross-connects not yet provisioned |
+| Router Interfaces & BGP Peers | ⏳ Pending | Depends on IC attachments |
+
+---
+
+## Resources
+
+### VPC Networks (`network.tf`)
+
+| Resource | Name | CIDR | Region |
+|---|---|---|---|
+| VPC | `hybrid-spoke-vpc` | — | global |
+| Subnet | `hybrid-spoke-subnet` | `10.1.1.0/24` | us-central1 |
+| VPC | `hybrid-service-vpc` | — | global |
+| Subnet | `hybrid-service-subnet` | `10.1.2.0/24` | us-central1 |
+
+### Network Connectivity Center (`network.tf`)
+
+| Resource | Name | Linked VPC |
+|---|---|---|
+| NCC Hub | `ncc-hub` | — |
+| Spoke | `hybrid-spoke` | `hybrid-spoke-vpc` |
+| Spoke | `hybrid-service-spoke` | `hybrid-service-vpc` |
+
+NCC provides transitive connectivity between `hybrid-spoke-vpc` and `hybrid-service-vpc` without VPC peering.
+
+### Cloud Router & BGP Export Policy (`router.tf`)
+
+| Resource | Name | Detail |
+|---|---|---|
+| Cloud Router | `hybrid-router` | VPC: `hybrid-spoke-vpc` · ASN: `64620` |
+| Route Policy | `prepend-on-prefix-match` | EXPORT · match `10.2.2.0/24` · AS-path prepend `64620` × 5 |
+
+The export policy makes `10.2.2.0/24` less preferred when advertised to on-premises, enabling traffic engineering via AS-path length.
+
+### Dedicated Interconnect, Interfaces & BGP Peers (`router.tf`) — Pending
+
+Defined but commented out. Uncomment once physical cross-connects are established at the colocation facilities.
+
+| Resource | Name | Detail |
+|---|---|---|
+| IC Attachment | `ashburn-ic` | Dedicated · Availability Domain 1 · 10 Gbps |
+| IC Attachment | `chicago-ic` | Dedicated · Availability Domain 2 · 10 Gbps |
+| Router Interface | `router-ashburn-interface-01` | `169.254.10.1/30` |
+| Router Interface | `router-chicago-interface-01` | `169.254.20.1/30` |
+| BGP Peer | `ashburn-peer` | Peer IP: `169.254.10.2` · Peer ASN: `65512` · applies `prepend-on-prefix-match` |
+| BGP Peer | `chicago-peer` | Peer IP: `169.254.20.2` · Peer ASN: `65512` · applies `prepend-on-prefix-match` |
+
+### Firewall Rules (`firewall.tf`) — Pending
+
+Defined but commented out. Requires the `compute.securityAdmin` or `compute.networkAdmin` IAM role to be granted before applying.
+
+| Rule Name | Applied VPC | Protocol | Source Ranges |
+|---|---|---|---|
+| `hub-allow-internal` | `hybrid-spoke-vpc` | all | `10.1.1.0/24`, `10.1.2.0/24` |
+| `spoke-allow-internal` | `hybrid-service-vpc` | all | `10.1.1.0/24`, `10.1.2.0/24` |
+
+---
+
+## Variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `project` | yes | GCP project name |
+| `project_id` | yes | GCP project ID |
+| `region` | no (default: `us-central1`) | Deployment region |
+| `router_asn` | yes | Cloud Router BGP ASN |
+| `peer_asn` | yes | On-premises BGP peer ASN |
+
+> **Note:** `terraform.tfvars` contains project-identifying values and must not be committed to version control. Add it to `.gitignore`.
+
+---
+
+## Providers
+
+| Provider | Version |
+|---|---|
+| `hashicorp/google` | `>= 7.18.0` |
+| `hashicorp/tls` | — (proxy from env) |
+
+---
+
+## Usage
+
+```bash
+# Initialise providers
+terraform init
+
+# Preview changes
+terraform plan
+
+# Apply
+terraform apply
+```
+
+---
+
+## File Structure
+
+```
+.
+├── firewall.tf      # VPC firewall rules (commented out — awaiting IAM permissions)
+├── import.tf        # (commented) import blocks used during initial resource onboarding
+├── network.tf       # VPCs, subnets, NCC hub and spokes
+├── providers.tf     # Google and TLS provider configuration
+├── router.tf        # Cloud Router, BGP route policy; IC/interface/BGP blocks commented out
+├── terraform.tfvars # Variable values — DO NOT COMMIT
+├── variables.tf     # Input variable declarations
+└── README.md        # This file
+```
+
+Terraform configuration for a Google Cloud hybrid networking topology using **Dedicated Interconnect**, **Cloud Router (BGP)**, and **Network Connectivity Center (NCC)**.
+
+---
+
+## Architecture Overview
+
+```mermaid
+graph TB
     subgraph OnPrem["On-Premises Network (Planned)"]
         OPR["On-Premises Router\nASN: 65512"]
     end
